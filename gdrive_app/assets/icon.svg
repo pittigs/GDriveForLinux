@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360" width="100%" height="100%">
+  <!-- Definition of gradients for modern look -->
+  <defs>
+    <linearGradient id="blue_grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4285F4"/>
+      <stop offset="100%" stop-color="#2a6cd2"/>
+    </linearGradient>
+    <linearGradient id="green_grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34A853"/>
+      <stop offset="100%" stop-color="#24873c"/>
+    </linearGradient>
+    <linearGradient id="yellow_grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBBC05"/>
+      <stop offset="100%" stop-color="#e2a700"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <!-- Yellow side (left/bottom diagonal) -->
+    <path d="M 125 60 L 235 60 L 345 250 L 235 250 Z" fill="url(#yellow_grad)" />
+    
+    <!-- Blue side (right diagonal) -->
+    <path d="M 235 60 L 345 250 L 290 346 L 180 156 Z" fill="url(#blue_grad)" />
+    
+    <!-- Green side (bottom diagonal) -->
+    <path d="M 125 60 L 180 156 L 70 346 L 15 250 Z" fill="url(#green_grad)" />
+  </g>
+</svg>

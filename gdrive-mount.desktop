@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Google Drive Mount
+Comment=Google Drive auf Linux wie in Windows mounten
+Exec=PLACEHOLDER_EXEC
+Icon=PLACEHOLDER_ICON
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
