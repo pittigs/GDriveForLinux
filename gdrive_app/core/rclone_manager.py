@@ -97,6 +97,7 @@ class RcloneManager(QObject):
     # Signals now accept profile name as their first argument for multi-account routing
     mount_status_changed = pyqtSignal(str, bool, str) # (profile_name, is_mounted, status_message)
     log_received = pyqtSignal(str, str) # (profile_name, text_log)
+    transfer_stats_received = pyqtSignal(str, dict) # (profile_name, stats_dict)
 
     def __init__(self, config):
         super().__init__()
@@ -268,7 +269,15 @@ class RcloneManager(QObject):
             str(mount_path),
             "--vfs-cache-mode", cache_mode,
             "--vfs-cache-max-age", cache_max_age,
-            "--vfs-cache-max-size", cache_max_size
+            "--vfs-cache-max-size", cache_max_size,
+            "--dir-cache-time", "72h",
+            "--poll-interval", "15s",
+            "--vfs-read-chunk-size", "32M",
+            "--vfs-read-chunk-size-limit", "off",
+            "--buffer-size", "32M",
+            "--vfs-fast-fingerprint",
+            "--stats", "1s",
+            "--stats-one-line"
         ]
         
         # Add VFS write-back delay if configured
@@ -298,6 +307,23 @@ class RcloneManager(QObject):
             return
         data = process.readAllStandardOutput().data().decode("utf-8", errors="replace")
         self.log_received.emit(profile_name, data)
+        
+        # Parse stats-one-line if present
+        import re
+        stats_regex = re.compile(
+            r'INFO\s+:\s*([0-9.]+\s*\w+)?\s*/\s*([0-9.]+\s*\w+|-)?\s*,\s*([0-9%]+|-)\s*,\s*([0-9.]+\s*\w+/s|0\s*B/s)\s*,\s*ETA\s*([^\s\n\r]+)'
+        )
+        for line in data.splitlines():
+            match = stats_regex.search(line)
+            if match:
+                stats_dict = {
+                    "transferred": match.group(1).strip() if match.group(1) else "",
+                    "total": match.group(2).strip() if match.group(2) else "",
+                    "percentage": match.group(3).strip() if match.group(3) else "",
+                    "speed": match.group(4).strip() if match.group(4) else "",
+                    "eta": match.group(5).strip() if match.group(5) else ""
+                }
+                self.transfer_stats_received.emit(profile_name, stats_dict)
 
     def _handle_mount_finished(self, profile_name, exit_code, exit_status):
         self.mount_status_changed.emit(profile_name, False, "Nicht verbunden")

@@ -16,6 +16,7 @@ from gdrive_app.core.network import check_internet
 from gdrive_app.gui.styles import THEME_STYLE
 from gdrive_app.gui.profile_dialog import ProfileDialog
 from gdrive_app.gui.wizard import SetupWizard
+from gdrive_app.core.prefetcher import PrefetchManager
 
 class StatsWorker(QThread):
     stats_loaded = pyqtSignal(str, dict) # (profile_name, stats)
@@ -68,6 +69,8 @@ class MainWindow(QMainWindow):
         self.open_folder_btns = {}
         self.storage_progress_bars = {}
         self.storage_details = {}
+        self.speed_labels = {}
+        self.prefetch_labels = {}
         
         # Header (Logo & App Name & Connection status & Add Account)
         self.setup_header()
@@ -82,6 +85,13 @@ class MainWindow(QMainWindow):
         # Connect signals
         self.manager.mount_status_changed.connect(self.on_mount_status_changed)
         self.manager.log_received.connect(self.append_log)
+        self.manager.transfer_stats_received.connect(self.on_transfer_stats_received)
+        
+        # Start predictive prefetcher
+        self.prefetcher = PrefetchManager(self.config, self.manager)
+        self.prefetcher.status_changed.connect(self.on_prefetch_status_changed)
+        self.prefetcher.log_message.connect(self.on_prefetch_log_received)
+        self.prefetcher.start()
         
         # Timers
         self.status_timer = QTimer(self)
@@ -165,6 +175,8 @@ class MainWindow(QMainWindow):
         self.open_folder_btns.clear()
         self.storage_progress_bars.clear()
         self.storage_details.clear()
+        self.speed_labels.clear()
+        self.prefetch_labels.clear()
         
         profiles = self.config.get_profiles()
         
@@ -251,6 +263,34 @@ class MainWindow(QMainWindow):
             path_lbl = QLabel(f"Zielordner: {mount_path}  |  Lokal speichern: {cache_status}")
             path_lbl.setStyleSheet("color: #a0a0a9; font-size: 11px;")
             card_layout.addWidget(path_lbl)
+            
+            # Speed/transfer info row
+            speed_layout = QHBoxLayout()
+            speed_title = QLabel("Übertragungsgeschwindigkeit:")
+            speed_title.setStyleSheet("color: #a0a0a9; font-size: 11px;")
+            speed_layout.addWidget(speed_title)
+            
+            speed_val = QLabel("Inaktiv")
+            speed_val.setStyleSheet("color: #4285F4; font-size: 11px; font-weight: bold;")
+            speed_layout.addWidget(speed_val)
+            speed_layout.addStretch()
+            
+            card_layout.addLayout(speed_layout)
+            self.speed_labels[name] = speed_val
+            
+            # Prediction/Prefetch status row
+            prefetch_layout = QHBoxLayout()
+            prefetch_title = QLabel("Intelligente Prediction (Prefetch):")
+            prefetch_title.setStyleSheet("color: #a0a0a9; font-size: 11px;")
+            prefetch_layout.addWidget(prefetch_title)
+            
+            prefetch_val = QLabel("Inaktiv" if not profile.get("prefetch_enabled", True) else "Bereit")
+            prefetch_val.setStyleSheet("color: #8e8e93; font-size: 11px; font-weight: bold;")
+            prefetch_layout.addWidget(prefetch_val)
+            prefetch_layout.addStretch()
+            
+            card_layout.addLayout(prefetch_layout)
+            self.prefetch_labels[name] = prefetch_val
             
             # Space Stats row
             storage_progress = QProgressBar()
@@ -512,6 +552,10 @@ class MainWindow(QMainWindow):
                         3000
                     )
         else:
+            speed_lbl = self.speed_labels.get(profile_name)
+            if speed_lbl:
+                speed_lbl.setText("Inaktiv")
+                
             if self.network_status_lbl.text() == "Offline" and self.desired_mount_states.get(profile_name, False):
                 dot.setStyleSheet("#StatusDot { background-color: #FBBC05; border-radius: 6px; }")
                 status_lbl.setText("Warte auf Netzwerk...")
@@ -677,6 +721,34 @@ class MainWindow(QMainWindow):
                 detail.setText("Fehler beim Laden der Speicherplatzinformationen.")
         else:
             detail.setText("Keine Speicherplatzdaten verfügbar.")
+            
+    @pyqtSlot(str, dict)
+    def on_transfer_stats_received(self, profile_name, stats):
+        speed_lbl = self.speed_labels.get(profile_name)
+        if not speed_lbl:
+            return
+            
+        speed = stats.get("speed", "0 B/s")
+        transferred = stats.get("transferred", "")
+        total = stats.get("total", "")
+        percentage = stats.get("percentage", "")
+        eta = stats.get("eta", "")
+        
+        # If no active transfers, keep it simple
+        if speed == "0 B/s" or not transferred or total == "-" or total == "0 B":
+            speed_lbl.setText("Inaktiv (0 B/s)")
+        else:
+            info = f"{speed}"
+            if transferred and total and total != "-":
+                info += f" ({transferred} von {total}"
+                if percentage and percentage != "-":
+                    info += f", {percentage}"
+                if eta and eta != "-":
+                    info += f", ETA {eta}"
+                info += ")"
+            elif eta and eta != "-":
+                info += f" (ETA {eta})"
+            speed_lbl.setText(info)
 
     @pyqtSlot(str, str)
     def append_log(self, profile_name, text):
@@ -735,6 +807,27 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Ungültiger Pfad", "Der angegebene Pfad existiert nicht oder ist nicht ausführbar.")
 
+    @pyqtSlot(str, str)
+    def on_prefetch_status_changed(self, profile_name, status_text):
+        lbl = self.prefetch_labels.get(profile_name)
+        if not lbl:
+            return
+        lbl.setText(status_text)
+        
+        # Color coding status
+        if "Vorab-Herunterladen" in status_text:
+            lbl.setStyleSheet("color: #FBBC05; font-size: 11px; font-weight: bold;")
+        elif status_text == "Bereit":
+            lbl.setStyleSheet("color: #34A853; font-size: 11px; font-weight: bold;")
+        elif status_text == "Limit erreicht (Pause)":
+            lbl.setStyleSheet("color: #FBBC05; font-size: 11px; font-weight: bold;")
+        else:
+            lbl.setStyleSheet("color: #8e8e93; font-size: 11px; font-weight: bold;")
+
+    @pyqtSlot(str, str)
+    def on_prefetch_log_received(self, profile_name, message):
+        self.append_log(profile_name, f"{message}\n")
+
     def closeEvent(self, event):
         # Hide to tray rather than exiting
         if self.config.get_profiles():
@@ -743,4 +836,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'tray_icon_ref') and self.tray_icon_ref:
                 self.tray_icon_ref.show_minimize_message()
         else:
+            # Stop the prefetcher background thread before exiting
+            if hasattr(self, 'prefetcher') and self.prefetcher:
+                self.prefetcher.stop()
             event.accept()

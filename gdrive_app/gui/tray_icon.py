@@ -107,6 +107,9 @@ class GDriveTrayIcon(QSystemTrayIcon):
 
     def quit_application(self):
         self.hide()
+        # Stop prefetcher thread
+        if hasattr(self.main_window, 'prefetcher') and self.main_window.prefetcher:
+            self.main_window.prefetcher.stop()
         # Cleanly stop all FUSE mount processes before exit
         self.manager.stop_all_mounts()
         QApplication.quit()

@@ -101,6 +101,10 @@ class ProfileDialog(QDialog):
         self.keep_cached_cb.setChecked(self.profile_data.get("keep_cached", False))
         self.card_layout.addWidget(self.keep_cached_cb)
         
+        self.prefetch_cb = QCheckBox("Intelligentes Vorab-Herunterladen (Prediction)")
+        self.prefetch_cb.setChecked(self.profile_data.get("prefetch_enabled", True))
+        self.card_layout.addWidget(self.prefetch_cb)
+        
         self.layout.addWidget(self.card)
         
         # Buttons
@@ -165,6 +169,7 @@ class ProfileDialog(QDialog):
         self.profile_data["bw_limit"] = limit
         self.profile_data["mount_on_start"] = self.mount_on_start_cb.isChecked()
         self.profile_data["keep_cached"] = self.keep_cached_cb.isChecked()
+        self.profile_data["prefetch_enabled"] = self.prefetch_cb.isChecked()
         
         self.accept()
 

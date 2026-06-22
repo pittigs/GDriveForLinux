@@ -20,7 +20,10 @@ class AppConfig:
         "cache_mode": "full",
         "write_back_delay": "5s",
         "bw_limit": "",
-        "keep_cached": False
+        "keep_cached": False,
+        "prefetch_enabled": True,
+        "prefetch_remote_recent": True,
+        "prefetch_siblings": True
     }
 
     def __init__(self):
@@ -93,7 +96,11 @@ class AppConfig:
 
     # Profile management methods
     def get_profiles(self):
-        return self.settings.get("profiles", [])
+        profiles = self.settings.get("profiles", [])
+        # Ensure all default keys are present in each profile
+        for i, profile in enumerate(profiles):
+            self.settings["profiles"][i] = {**self.DEFAULT_PROFILE, **profile}
+        return self.settings["profiles"]
 
     def get_profile(self, name):
         for profile in self.get_profiles():
