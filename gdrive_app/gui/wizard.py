@@ -16,7 +16,7 @@ class SetupWizard(QWizard):
         
         self.setWindowTitle("Google Drive Verbindung hinzufügen")
         self.setWindowIcon(QIcon(str(Path(__file__).parents[1] / "assets" / "icon.svg")))
-        self.resize(550, 420)
+        self.resize(550, 520)
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
         
         self.setOption(QWizard.WizardOption.NoCancelButton, False)
@@ -167,7 +167,7 @@ class OptionsPage(QWizardPage):
         layout.addLayout(dir_layout)
         
         # 3. Checkboxes
-        layout.addSpacing(10)
+        layout.addSpacing(5)
         self.autostart_cb = QCheckBox("Google Drive beim Systemstart automatisch mounten")
         self.autostart_cb.setChecked(self.config.autostart)
         layout.addWidget(self.autostart_cb)
@@ -176,8 +176,48 @@ class OptionsPage(QWizardPage):
         self.mount_now_cb.setChecked(True)
         layout.addWidget(self.mount_now_cb)
         
+        # 4. Custom API checkbox and inputs
+        self.custom_api_cb = QCheckBox("Eigene Google API-Zugangsdaten verwenden (Sehr empfohlen für Performance)")
+        self.custom_api_cb.stateChanged.connect(self.toggle_custom_api_widget)
+        layout.addWidget(self.custom_api_cb)
+        
+        self.custom_api_widget = QWidget()
+        api_layout = QVBoxLayout(self.custom_api_widget)
+        api_layout.setContentsMargins(15, 0, 15, 0)
+        api_layout.setSpacing(8)
+        
+        self.help_api_btn = QPushButton("Wie erstelle ich meine eigenen API-Zugangsdaten? (Anleitung im Browser öffnen)")
+        self.help_api_btn.setStyleSheet("color: #4285F4; text-decoration: underline; background: transparent; border: none; font-size: 11px; text-align: left; padding: 0;")
+        self.help_api_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.help_api_btn.clicked.connect(self.open_api_guide)
+        api_layout.addWidget(self.help_api_btn)
+        
+        id_layout = QHBoxLayout()
+        id_layout.addWidget(QLabel("Client-ID:"))
+        self.client_id_input = QLineEdit()
+        self.client_id_input.setPlaceholderText("Google Client-ID hier einfügen")
+        id_layout.addWidget(self.client_id_input)
+        api_layout.addLayout(id_layout)
+        
+        secret_layout = QHBoxLayout()
+        secret_layout.addWidget(QLabel("Client-Secret:"))
+        self.client_secret_input = QLineEdit()
+        self.client_secret_input.setPlaceholderText("Google Client-Secret hier einfügen")
+        secret_layout.addWidget(self.client_secret_input)
+        api_layout.addLayout(secret_layout)
+        
+        self.custom_api_widget.setVisible(False)
+        layout.addWidget(self.custom_api_widget)
+        
         layout.addStretch()
         self.setLayout(layout)
+
+    def toggle_custom_api_widget(self, state):
+        show = state == Qt.CheckState.Checked.value
+        self.custom_api_widget.setVisible(show)
+
+    def open_api_guide(self):
+        QDesktopServices.openUrl(QUrl("https://rclone.org/drive/#making-your-own-client-id"))
 
     def initializePage(self):
         # Suggest unique defaults
@@ -243,12 +283,24 @@ class OptionsPage(QWizardPage):
             remote_name = f"{orig_remote}_{idx}"
             idx += 1
 
+        use_custom_api = self.custom_api_cb.isChecked()
+        client_id = self.client_id_input.text().strip()
+        client_secret = self.client_secret_input.text().strip()
+        
+        if use_custom_api:
+            if not client_id or not client_secret:
+                QMessageBox.warning(self, "Warnung", "Bitte geben Sie sowohl eine Client-ID als auch ein Client-Secret ein, oder deaktivieren Sie die Option.")
+                return False
+
         # Store wizard properties to pass to AuthPage
         self.wizard().setProperty("profile_name", profile_name)
         self.wizard().setProperty("mount_path", selected_path)
         self.wizard().setProperty("remote_name", remote_name)
         self.wizard().setProperty("autostart_profile", self.autostart_cb.isChecked())
         self.wizard().setProperty("mount_now", self.mount_now_cb.isChecked())
+        self.wizard().setProperty("use_custom_api", use_custom_api)
+        self.wizard().setProperty("client_id", client_id if use_custom_api else "")
+        self.wizard().setProperty("client_secret", client_secret if use_custom_api else "")
         return True
 
 
@@ -323,11 +375,26 @@ class AuthPage(QWizardPage):
         self.status_lbl.setText("Starte rclone Verbindungsprozess...")
         self.status_lbl.setStyleSheet("color: #FBBC05; font-weight: bold;")
         
-        success, err = self.manager.start_auth(self.remote_name, self.handle_auth_output)
+        client_id = self.wizard().property("client_id")
+        client_secret = self.wizard().property("client_secret")
+        
+        success, err = self.manager.start_auth(
+            self.remote_name, 
+            self.handle_auth_output,
+            client_id=client_id,
+            client_secret=client_secret
+        )
         if not success:
             self.status_lbl.setText(f"Fehler: {err}")
             self.status_lbl.setStyleSheet("color: #EA4335; font-weight: bold;")
             self.login_btn.setEnabled(True)
+        else:
+            # Connect the finished signal only once here
+            try:
+                self.manager.auth_process.finished.disconnect(self.on_auth_process_finished)
+            except (TypeError, AttributeError):
+                pass
+            self.manager.auth_process.finished.connect(self.on_auth_process_finished)
 
     def handle_auth_output(self, text):
         if "http://127.0.0.1:53682/" in text:
@@ -338,8 +405,6 @@ class AuthPage(QWizardPage):
                 self.status_lbl.setStyleSheet("color: #FBBC05; font-weight: bold;")
                 self.link_btn.setVisible(True)
                 QDesktopServices.openUrl(QUrl(self.auth_url))
-                
-        self.manager.auth_process.finished.connect(self.on_auth_process_finished)
 
     def on_auth_process_finished(self, exit_code, exit_status):
         self.link_btn.setVisible(False)
@@ -352,6 +417,7 @@ class AuthPage(QWizardPage):
             
             # Save profile to config *after* successful authentication
             profile_name = self.wizard().property("profile_name")
+            use_custom_api = self.wizard().property("use_custom_api")
             new_profile = {
                 "name": profile_name,
                 "remote_name": self.remote_name,
@@ -359,7 +425,11 @@ class AuthPage(QWizardPage):
                 "mount_on_start": True,
                 "cache_mode": "full",
                 "write_back_delay": "5s",
-                "bw_limit": ""
+                "bw_limit": "",
+                "use_custom_api": use_custom_api,
+                "drive_chunk_size": "64M",
+                "buffer_size": "64M",
+                "vfs_read_ahead": "128M"
             }
             self.config.add_profile(new_profile)
             

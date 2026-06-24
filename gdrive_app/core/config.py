@@ -23,7 +23,11 @@ class AppConfig:
         "keep_cached": False,
         "prefetch_enabled": True,
         "prefetch_remote_recent": True,
-        "prefetch_siblings": True
+        "prefetch_siblings": True,
+        "use_custom_api": False,
+        "drive_chunk_size": "64M",
+        "buffer_size": "64M",
+        "vfs_read_ahead": "128M"
     }
 
     def __init__(self):

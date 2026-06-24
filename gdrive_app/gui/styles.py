@@ -286,4 +286,21 @@ QComboBox QAbstractItemView {
     selection-color: #ffffff;
     padding: 4px;
 }
+
+/* GroupBox styling */
+QGroupBox {
+    border: 1px solid #2d2d34;
+    border-radius: 8px;
+    margin-top: 16px;
+    padding-top: 18px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 0 5px;
+}
 """

@@ -173,7 +173,7 @@ class RcloneManager(QObject):
             print(f"Error deleting config section '{remote_name}': {e}")
             return False
 
-    def start_auth(self, remote_name, on_output_callback):
+    def start_auth(self, remote_name, on_output_callback, client_id=None, client_secret=None):
         """Starts the Google Drive authentication subprocess for a remote."""
         rclone_bin = self.find_rclone()
         if not rclone_bin:
@@ -192,6 +192,10 @@ class RcloneManager(QObject):
             "drive",
             "scope=drive"
         ]
+        if client_id:
+            args.append(f"client_id={client_id.strip()}")
+        if client_secret:
+            args.append(f"client_secret={client_secret.strip()}")
         
         self.current_auth_profile = remote_name
         self.auth_process.readyReadStandardOutput.connect(
@@ -200,6 +204,49 @@ class RcloneManager(QObject):
         
         self.auth_process.start(rclone_bin, args)
         return True, ""
+
+    def get_remote_credentials(self, remote_name):
+        """Reads client_id and client_secret for the given remote from rclone.conf."""
+        config_file = Path(self.config.rclone_config_path)
+        if not config_file.exists():
+            return "", ""
+        try:
+            parser = configparser.ConfigParser()
+            parser.read(config_file)
+            if remote_name in parser.sections():
+                section = parser[remote_name]
+                return section.get("client_id", ""), section.get("client_secret", "")
+        except Exception as e:
+            print(f"Error reading remote credentials from rclone.conf: {e}")
+        return "", ""
+
+    def update_remote_credentials(self, remote_name, client_id, client_secret):
+        """Updates client_id and client_secret for the given remote in rclone.conf."""
+        config_file = Path(self.config.rclone_config_path)
+        if not config_file.exists():
+            return False
+        try:
+            parser = configparser.ConfigParser()
+            parser.read(config_file)
+            if remote_name not in parser.sections():
+                parser.add_section(remote_name)
+            
+            if client_id:
+                parser[remote_name]["client_id"] = client_id.strip()
+            elif "client_id" in parser[remote_name]:
+                parser.remove_option(remote_name, "client_id")
+                
+            if client_secret:
+                parser[remote_name]["client_secret"] = client_secret.strip()
+            elif "client_secret" in parser[remote_name]:
+                parser.remove_option(remote_name, "client_secret")
+                
+            with open(config_file, "w") as f:
+                parser.write(f)
+            return True
+        except Exception as e:
+            print(f"Error updating remote credentials in rclone.conf: {e}")
+        return False
 
     def cancel_auth(self):
         if self.auth_process and self.auth_process.state() == QProcess.ProcessState.Running:
@@ -262,6 +309,10 @@ class RcloneManager(QObject):
         cache_max_age = "9999h" if keep_cached else "24h"
         cache_max_size = "off" if keep_cached else "10G"
         
+        drive_chunk_size = profile.get("drive_chunk_size", "64M").strip()
+        buffer_size = profile.get("buffer_size", "64M").strip()
+        vfs_read_ahead = profile.get("vfs_read_ahead", "128M").strip()
+        
         args = [
             "--config", self.config.rclone_config_path,
             "mount",
@@ -272,13 +323,19 @@ class RcloneManager(QObject):
             "--vfs-cache-max-size", cache_max_size,
             "--dir-cache-time", "72h",
             "--poll-interval", "15s",
-            "--vfs-read-chunk-size", "32M",
-            "--vfs-read-chunk-size-limit", "off",
-            "--buffer-size", "32M",
+            "--vfs-read-chunk-size", "64M",            # Tuned up from 32M for improved sequential read
+            "--vfs-read-chunk-size-limit", "2G",       # Tuned to allow up to 2G chunk sizes for large files
             "--vfs-fast-fingerprint",
             "--stats", "1s",
             "--stats-one-line"
         ]
+        
+        if buffer_size:
+            args.extend(["--buffer-size", buffer_size])
+        if vfs_read_ahead and vfs_read_ahead.lower() != "off":
+            args.extend(["--vfs-read-ahead", vfs_read_ahead])
+        if drive_chunk_size:
+            args.extend(["--drive-chunk-size", drive_chunk_size])
         
         # Add VFS write-back delay if configured
         write_back = profile.get("write_back_delay", "5s").strip()
